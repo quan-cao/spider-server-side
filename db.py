@@ -162,6 +162,5 @@ class DBConnection:
                 return data
 
 
-    def clear_connection(self):
-        if self.pg_pool:
-            self.pg_pool.closeall()
+    def __del__(self):
+        self.pg_pool.closeall()
