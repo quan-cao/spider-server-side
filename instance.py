@@ -25,6 +25,8 @@ class SeleniumInstance:
         self.token = token
         self.ping = ping
 
+        self.hubspot_contact_path = 'C:\\Works\\repos\\gsheet-api-playground\\hubspot_contact'
+
         software_names = [SoftwareName.CHROME.value]
         operating_systems = [OperatingSystem.WINDOWS.value, OperatingSystem.LINUX.value, OperatingSystem.MAC.value]   
         self.user_agent_rotator = UserAgent(software_names=software_names, operating_systems=operating_systems, limit=100)
@@ -107,7 +109,7 @@ class SeleniumInstance:
                 self.runAds = False
                 self.driverGroups.close()
 
-            oldUsers = pd.read_pickle('hubspot_contact')
+            oldUsers = pd.read_pickle(self.hubspot_contact_path)
             dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'phone', 'post', 'content', 'group', 'user_email'])
 
             while self.runGroups:
@@ -168,13 +170,13 @@ class SeleniumInstance:
                                 oldPosts = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'phone', 'post', 'content', 'group', 'user_email'])
                             else:
                                 oldPosts = pd.json_normalize(json.loads(oldPosts))
-                            dataframe = dataframe[(~dataframe.post.isin(oldPosts.post)) & (~dataframe.content.isin(oldPosts.content))]
+                            dataframe = dataframe[(~dataframe.post.isin(oldPosts.post.tolist())) & (~dataframe.content.isin(oldPosts.content.tolist()))]
                             if len(dataframe) > 0:
                                 push_tele(teleId, 'groups', df=dataframe)
                                 self.dbconn.insert_fb_posts(dataframe)
                             dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'phone', 'post', 'content', 'group', 'user_email'])
                     except Exception as err:
-                        if type(err).__name__ in ['WebDriverException', 'NoSuchWindowException', 'ProtocolError']:
+                        if type(err).__name__ in ['InvalidSessionIdException', 'NoSuchWindowException', 'ProtocolError']:
                             try:
                                 self.driverAds.close()
                             except:
@@ -218,7 +220,7 @@ class SeleniumInstance:
                 except:
                     pass
 
-            oldUsers = pd.read_pickle('hubspot_contact')
+            oldUsers = pd.read_pickle(self.hubspot_contact_path)
             
             while self.runAds:
                 if datetime.datetime.now() - self.ping > datetime.timedelta(seconds=30):
@@ -230,6 +232,7 @@ class SeleniumInstance:
                             self.driverAds.close()
                         self.driverAds.get('https://www.facebook.com')
                         for _ in range(30):
+                            time.sleep(1)
                             elems = WebDriverWait(self.driverAds, 20).until(EC.presence_of_all_elements_located((By.CLASS_NAME, '_4-u2')))
                             self.driverAds.switch_to.active_element.send_keys(Keys.PAGE_DOWN)
                             for e in elems[7:]:
@@ -245,19 +248,22 @@ class SeleniumInstance:
                                                     page = e.find_element_by_link_text(re.sub('\.$', '', e.find_element_by_class_name('_7tae').text.split(' like ')[1])).get_attribute('href').split('/')[3]
                                                 elif e.find_element_by_class_name('_7tae').text.find('thích') != -1:
                                                     page = e.find_element_by_link_text(re.sub('\.$', '', e.find_element_by_class_name('_7tae').text.split(' thích ')[1])).get_attribute('href').split('/')[3]
-                                        
+
+                                        facebook = 'https://www.facebook.com/' + page
+                                    
                                         oldData = self.dbconn.get_all_posts(self.userEmail, 'ads')
                                         if oldData != '[]':
                                             oldData = pd.json_normalize(json.loads(oldData))
                                         else:
                                             oldData = pd.DataFrame(columns=['profile'])
 
-                                        if page not in oldData.profile:
+                                        isNew = facebook not in oldData.profile.tolist()
+
+                                        if isNew:
                                             # Get page info
                                             self.driverAds.execute_script(f"window.open('{'https://www.facebook.com/' + page + '/about?ref=page_internal'}');")
                                             self.driverAds.switch_to.window(self.driverAds.window_handles[-1])
                                             name = WebDriverWait(self.driverAds, 20).until(EC.presence_of_element_located((By.CLASS_NAME, '_64-f'))).text
-                                            facebook = 'https://www.facebook.com/' + page
                                             checkPhone = 0
                                             try:
                                                 pageInfo = WebDriverWait(self.driverAds, 20).until(EC.presence_of_element_located((By.ID, 'content')))
@@ -288,7 +294,7 @@ class SeleniumInstance:
                                             self.driverAds.close()
                                             self.driverAds.switch_to.window(self.driverAds.window_handles[0])
                     except Exception as err:
-                        if type(err).__name__ in ['WebDriverException', 'NoSuchWindowException', 'ProtocolError']:
+                        if type(err).__name__ in ['InvalidSessionIdException', 'NoSuchWindowException', 'ProtocolError']:
                             try:
                                 self.driverAds.close()
                             except:
