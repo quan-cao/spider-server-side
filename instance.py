@@ -10,6 +10,7 @@ from random_user_agent.params import SoftwareName, OperatingSystem
 
 from utils import get_regex, push_tele
 from accounts import *
+import globals
 
 import pandas as pd
 import time, datetime, threading, re, json, requests
@@ -72,7 +73,7 @@ class SeleniumInstance:
                 self.driverGroups.close()
                 self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'stop_scrape_groups', email2, groupIdList), transform=False)
 
-            del active_users[self.userEmail]
+            del globals.active_users[self.userEmail]
             self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'close_connection', None, None), transform=False)
 
 

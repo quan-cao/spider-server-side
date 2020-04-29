@@ -11,9 +11,10 @@ from db import DBConnection
 from instance import SeleniumInstance
 from utils import get_regex, push_tele, generate_string
 from accounts import *
+import globals
 
 
-active_users = {}
+globals.initialize()
 dbconn = DBConnection()
 
 
@@ -22,7 +23,7 @@ class Ping(RequestHandler):
     def get(self):
         try:
             userEmail = self.get_body_argument('email')
-            active_users[userEmail].ping = datetime.datetime.now()
+            globals.active_users[userEmail].ping = datetime.datetime.now()
             self.write({'message':'Pinging'})
         except MissingArgumentError:
             self.write({'message':'Missing Arguments'})
@@ -40,22 +41,25 @@ class LoginHandler(RequestHandler):
             userEmail = self.get_body_argument('email')
             userPassword = self.get_body_argument('password')
             userVersion = self.get_body_argument('version')
-            version_is_valid = userVersion in versionAvailable
-            if version_is_valid:
-                email, password = dbconn.get_user(userEmail)
-                if password == '1':
-                    is_valid = userPassword == password
-                else:
-                    is_valid = check_password_hash(password, userPassword)
+            if userEmail not in globals.active_users:
+                version_is_valid = userVersion in versionAvailable
+                if version_is_valid:
+                    email, password = dbconn.get_user(userEmail)
+                    if password == '1':
+                        is_valid = userPassword == password
+                    else:
+                        is_valid = check_password_hash(password, userPassword)
 
-                if is_valid:
-                    token = generate_string()
-                    active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), token, datetime.datetime.now())
-                    self.write({'token':token})
+                    if is_valid:
+                        token = generate_string()
+                        globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), token, datetime.datetime.now())
+                        self.write({'token':token})
+                    else:
+                        self.write({'token':False, 'message':'Wrong Emaill/Password'})
                 else:
-                    self.write({'token':False, 'message':'Wrong Emaill/Password'})
+                    self.write({'token':False, 'message':'Wrong Version. Please Re-download'})
             else:
-                self.write({'token':False, 'message':'Wrong Version. Please Re-download'})
+                self.write({'token':False, 'message':'This account has already signed in'})
         except:
             self.write({'token':False, 'message':'Cannot Connect To Server'})
 
@@ -68,10 +72,10 @@ class ChangePassword(RequestHandler):
             userToken = self.get_body_argument('token')
             userNewPassword = self.get_body_argument('newPassword')
             userNewPassword = generate_password_hash(userNewPassword, 'sha256')
-            if userToken == active_users[userEmail].token:
+            if userToken == globals.active_users[userEmail].token:
                 dbconn.upsert_user(userEmail, userNewPassword)
                 self.write({'message':'Password Updated'})
-                dbconn.insert_app_event((active_users[userEmail].session, userEmail, datetime.datetime.now(), 'change_password', None, None), transform=False)
+                dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(), 'change_password', None, None), transform=False)
             else:
                 self.write({'message':'Token invalid'})
         except MissingArgumentError:
@@ -90,17 +94,17 @@ class ScrapeAds(RequestHandler):
             keywords = self.get_body_argument('keywords')
             blacklistKeywords = self.get_body_argument('blacklistKeywords')
 
-            if userToken == active_users[userEmail].token:
-                if userEmail not in active_users:
+            if userToken == globals.active_users[userEmail].token:
+                if userEmail not in globals.active_users:
                     self.write({'message':'Request Accepted'})
-                    active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
-                    active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
+                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
+                    globals.active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
 
-                elif active_users[userEmail].runAds == False:
+                elif globals.active_users[userEmail].runAds == False:
                     self.write({'message':'Request Accepted'})
-                    active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
+                    globals.active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
 
-                elif active_users[userEmail].runAds == True:
+                elif globals.active_users[userEmail].runAds == True:
                     self.write({'message':'Session Existed'})
             else:
                 self.write({'message':'Wrong Token'})
@@ -122,18 +126,18 @@ class ScrapeGroups(RequestHandler):
             blacklistKeywords = self.get_body_argument('blacklistKeywords')
             groupIdList = self.get_body_argument('groupIdList')
 
-            if userToken == active_users[userEmail].token:
-                if userEmail not in active_users:
+            if userToken == globals.active_users[userEmail].token:
+                if userEmail not in globals.active_users:
                     self.write({'message':'Request Accepted'})
-                    active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
+                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
                     user_ping[userEmail] = datetime.datetime.now()
-                    active_users[userEmail].start('groups', fb_email, fb_pass, teleId, keywords, blacklistKeywords, groupIdList)
+                    globals.active_users[userEmail].start('groups', fb_email, fb_pass, teleId, keywords, blacklistKeywords, groupIdList)
 
-                elif active_users[userEmail].runGroups == False:
+                elif globals.active_users[userEmail].runGroups == False:
                     self.write({'message':'Request Accepted'})
-                    active_users[userEmail].start('groups', fb_email, fb_pass, teleId, keywords, blacklistKeywords, groupIdList)
+                    globals.active_users[userEmail].start('groups', fb_email, fb_pass, teleId, keywords, blacklistKeywords, groupIdList)
 
-                elif active_users[userEmail].runGroups == True:
+                elif globals.active_users[userEmail].runGroups == True:
                     self.write({'message':'Session Existed'})
             else:
                 self.write({'message':'Wrong Token'})
@@ -154,9 +158,9 @@ class StopScrape(RequestHandler):
                 if i == '':
                     i = None
 
-            if userToken == active_users[userEmail].token:
+            if userToken == globals.active_users[userEmail].token:
                 try:
-                    active_users[userEmail].stop(stopType, email, email2)
+                    globals.active_users[userEmail].stop(stopType, email, email2)
                     self.write({'message':'Session Stopped'})
                 except:
                     self.write({'message':'No Session Found'})
@@ -170,7 +174,7 @@ class StopScrape(RequestHandler):
 class ExtractPosts(RequestHandler):
     @coroutine
     def get(self):
-        global active_users
+        global globals
         try:
             userEmail = self.get_body_argument('email')
             userToken = self.get_body_argument('token')
@@ -178,11 +182,11 @@ class ExtractPosts(RequestHandler):
             fromTime = self.get_body_argument('fromTime')
             toTime = self.get_body_argument('toTime')
 
-            if userToken == active_users[userEmail].token:
+            if userToken == globals.active_users[userEmail].token:
                 data = dbconn.get_posts(userEmail, extractType, fromTime, toTime)
                 if data != '[]':
                     self.write({'message': data})
-                    dbconn.insert_app_event((active_users[userEmail].session, userEmail, datetime.datetime.now(),
+                    dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(),
                                             f"extract_{extractType}_posts", None, None), transform=False)
                 else:
                     self.write({'message':'No data'})
@@ -196,7 +200,7 @@ class ExtractPosts(RequestHandler):
 class CloseApp(RequestHandler):
     @coroutine
     def post(self):
-        global user_ping, active_users
+        global user_ping, globals
         try:
             userEmail = self.get_body_argument('email')
             userToken = self.get_body_argument('token')
@@ -204,9 +208,9 @@ class CloseApp(RequestHandler):
             email2 = self.get_body_argument('fb_email2')
             groupIdList = self.get_body_argument('group_id_list')
 
-            if userToken == active_users[userEmail].token:
+            if userToken == globals.active_users[userEmail].token:
                 self.write({'message':''})
-                active_users[userEmail].stop('both', email, email2, groupIdList)
+                globals.active_users[userEmail].stop('both', email, email2, groupIdList)
             else:
                 pass
 
