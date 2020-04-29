@@ -54,7 +54,7 @@ class SeleniumInstance:
 
 
     def stop(self, _type, email, email2, groupIdList=None):
-        global user_ping, active_users
+        global globals
         if _type == 'ads':
             self.runAds = False
             self.driverAds.close()
@@ -195,8 +195,6 @@ class SeleniumInstance:
 
 
     def scrape_ads(self, email, password, teleId, keywords, blacklistKeywords):
-        global user_ping
-
         self.runAds = True
 
         # Get keywords
