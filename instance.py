@@ -67,13 +67,13 @@ class SeleniumInstance:
                 self.runAds = False
                 self.driverAds.close()
                 self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'stop_scrape_ads', email, None), transform=False)
-            elif self.runGroups == True:
+            if self.runGroups == True:
                 self.runGroups = False
                 self.driverGroups.close()
                 self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'stop_scrape_groups', email2, groupIdList), transform=False)
 
-                del active_users[self.userEmail]
-                self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'close_connection', None, None), transform=False)
+            del active_users[self.userEmail]
+            self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'close_connection', None, None), transform=False)
 
 
     def log_in_facebook(self, driver, email, password):
@@ -109,24 +109,25 @@ class SeleniumInstance:
                 self.runAds = False
                 self.driverGroups.close()
 
-            oldUsers = pd.read_pickle(self.hubspot_contact_path)
+            oldUsers = pd.read_pickle(self.hubspot_contact_path).id.tolist()
             dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'phone', 'post', 'content', 'group', 'user_email'])
 
             while self.runGroups:
                 if datetime.datetime.now() - self.ping > datetime.timedelta(seconds=30):
-                    self.stop('groups', email, None)
+                    self.stop('both', email, None)
                 else:
                     try:
                         for groupId in groupIdList:
                             self.driverGroups.get(f'https://facebook.com/groups/{groupId.strip()}?sorting_setting=CHRONOLOGICAL')
                             posts = WebDriverWait(self.driverGroups, 5).until(EC.presence_of_all_elements_located((By.CLASS_NAME, 'userContentWrapper')))
                             for p in posts:
-                                if p.text.find('Vừa xong') != -1 or p.text.find('1 phút') != -1 or p.text.find('2 phút') != -1 or \
-                                    p.text.find('Just now') != -1 or p.text.find('1 min') != -1 or p.text.find('2 mins') != -1:
+                                if (p.text.find('Vừa xong') != -1) or (p.text.find('1 phút') != -1) or (p.text.find(' 2 phút') != -1) or \
+                                    (p.text.find('Just now') != -1) or (p.text.find('1 min') != -1) or (p.text.find(' 2 mins') != -1):
 
                                     try:
                                         p.find_element_by_class_name('see_more_link_inner').click()
-                                    except: pass
+                                    except:
+                                        pass
 
                                     content = p.find_element_by_class_name('userContent').text
                                     if content == '':
@@ -149,7 +150,7 @@ class SeleniumInstance:
                                                 phone = re.sub(r'^0', '84', phone)
                                             except:
                                                 phone = None
-                                            if phone in oldUsers.id:
+                                            if phone in oldUsers:
                                                 break
                                             else:
                                                 try:
@@ -205,8 +206,8 @@ class SeleniumInstance:
 
         self.driverAds = webdriver.Chrome(options=self.options)
         login = self.log_in_facebook(self.driverAds, email, password)
-        if login:
 
+        if login:
             try:
                 WebDriverWait(self.driverAds, 20).until(EC.presence_of_all_elements_located((By.CLASS_NAME, '_4-u2')))
             except Exception as e:
@@ -220,11 +221,11 @@ class SeleniumInstance:
                 except:
                     pass
 
-            oldUsers = pd.read_pickle(self.hubspot_contact_path)
+            oldUsers = pd.read_pickle(self.hubspot_contact_path).id.tolist()
             
             while self.runAds:
                 if datetime.datetime.now() - self.ping > datetime.timedelta(seconds=30):
-                    self.stop('ads', email, None)
+                    self.stop('both', email, None)
                 else:
                     try:
                         while len(self.driverAds.window_handles) > 1:
@@ -280,7 +281,7 @@ class SeleniumInstance:
                                                         phones.append(phone)
                                                 
                                                 for p in phones:
-                                                    if p in oldUsers.id:
+                                                    if p in oldUsers:
                                                         checkPhone += 1
                                                         break
                                             else:
