@@ -17,16 +17,16 @@ import time, datetime, threading, re, json, requests
 
 
 class SeleniumInstance:
-    def __init__(self, userEmail, dbconn, session, token, ping):
+    def __init__(self, userEmail, dbconn, token, session, ping):
         self.runAds = False
         self.runGroups = False
         self.userEmail = userEmail
         self.dbconn = dbconn
-        self.session = session
         self.token = token
+        self.session = session
         self.ping = ping
 
-        self.hubspot_contact_path = 'C:\\Works\\repos\\gsheet-api-playground\\hubspot_contact'
+        self.hubspot_contact_path = 'C:\\Works\\repos\\playground\\hubspot_contact'
 
         software_names = [SoftwareName.CHROME.value]
         operating_systems = [OperatingSystem.WINDOWS.value, OperatingSystem.LINUX.value, OperatingSystem.MAC.value]   
@@ -51,6 +51,7 @@ class SeleniumInstance:
             threading.Thread(target=self.scrape_ads, args=(email, password, teleId, keywords, blacklistKeywords,), daemon=True).start()
         elif _type == 'groups':
             threading.Thread(target=self.scrape_groups, args=(email, password, teleId, keywords, blacklistKeywords, groupIdList,), daemon=True).start()
+        threading.Thread(target=self.clear, daemon=True).start()
 
 
     def stop(self, _type, email, email2, groupIdList=None):
@@ -75,6 +76,13 @@ class SeleniumInstance:
 
             del globals.active_users[self.userEmail]
             self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'close_connection', None, None), transform=False)
+
+
+    def clear(self):
+        time.sleep(180)
+        if self.runAds == False and self.runGroups == False:
+            del globals.active_users[self.userEmail]
+            self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'session_timeout', None, None), transform=False)
 
 
     def log_in_facebook(self, driver, email, password):
@@ -183,14 +191,16 @@ class SeleniumInstance:
                                 self.driverAds.close()
                             except:
                                 break
+                            finally:
+                                err_text = f"An {type(err).__name__} error occured.\nYour session have stopped."
+                                data = {
+                                    'chat_id': teleId,
+                                    'text': err_text,
+                                    'parse_mode': 'HTML'
+                                }
+                                requests.post(f"https://api.telegram.org/bot{teleId}/sendMessage", data=data)
                         else:
-                            err_text = f"Error: {type(err).__name__}.\n{str(err)}\nFrom {email}"
-                            data = {
-                                'chat_id': ExceptionReceiverTelegramId,
-                                'text': err_text,
-                                'parse_mode': 'HTML'
-                            }
-                            requests.post(f"https://api.telegram.org/bot{telegramBotToken}/sendMessage", data=data)
+                            time.sleep(5)
                             continue
 
 
@@ -299,12 +309,14 @@ class SeleniumInstance:
                                 self.driverAds.close()
                             except:
                                 break
+                            finally:
+                                err_text = f"An {type(err).__name__} error occured.\nYour session have stopped."
+                                data = {
+                                    'chat_id': ExceptionReceiverTelegramId,
+                                    'text': err_text,
+                                    'parse_mode': 'HTML'
+                                }
+                                requests.post(f"https://api.telegram.org/bot{teleId}/sendMessage", data=data)
                         else:
-                            err_text = f"Error: {type(err).__name__}.\n{str(err)}\nFrom {email}"
-                            data = {
-                                'chat_id': ExceptionReceiverTelegramId,
-                                'text': err_text,
-                                'parse_mode': 'HTML'
-                            }
-                            requests.post(f"https://api.telegram.org/bot{telegramBotToken}/sendMessage", data=data)
+                            time.sleep(5)
                             continue
