@@ -1,5 +1,7 @@
-from tornado.gen import coroutine
-from tornado.web import Application, RequestHandler, MissingArgumentError
+import sys
+sys.path.append(sys.path[0]+'\\venv\\Lib\\site-packages') # For Task Schedule
+
+from tornado.web import Application, RequestHandler
 from tornado.ioloop import IOLoop
 import asyncio
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -19,14 +21,13 @@ dbconn = DBConnection()
 
 
 class Ping(RequestHandler):
-    @coroutine
     def get(self):
         try:
             userEmail = self.get_body_argument('email')
             globals.active_users[userEmail].ping = datetime.datetime.now()
             self.write({'message':'Pinging'})
-        except MissingArgumentError:
-            self.write({'message':'Missing Arguments'})
+        except:
+            pass
 
 
 class DemoScreen(RequestHandler):
@@ -35,37 +36,43 @@ class DemoScreen(RequestHandler):
 
 
 class LoginHandler(RequestHandler):
-    @coroutine
     def get(self):
         try:
             userEmail = self.get_body_argument('email')
             userPassword = self.get_body_argument('password')
             userVersion = self.get_body_argument('version')
             if userEmail not in globals.active_users:
-                version_is_valid = userVersion in versionAvailable
-                if version_is_valid:
+                if userVersion in versionAvailable:
                     email, password = dbconn.get_user(userEmail)
                     if password == '1':
-                        is_valid = userPassword == password
+                        isValid = userPassword == password
                     else:
-                        is_valid = check_password_hash(password, userPassword)
+                        isValid = check_password_hash(password, userPassword)
 
-                    if is_valid:
+                    if isValid:
                         token = generate_string()
-                        globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), token, datetime.datetime.now())
+                        globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, token, generate_string(6), datetime.datetime.now())
                         self.write({'token':token})
+                        dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(), 'logged_in', None, None), transform=False)
                     else:
+                        self.set_status(401)
                         self.write({'token':False, 'message':'Wrong Emaill/Password'})
+                        dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'wrong_password', None, None), transform=False)
                 else:
-                    self.write({'token':False, 'message':'Wrong Version. Please Re-download'})
+                    self.set_status(403)
+                    self.write({'token':False, 'message':'Wrong version. Please re-download'})
+                    dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'wrong_version', None, None), transform=False)
             else:
+                self.set_status(409)
                 self.write({'token':False, 'message':'This account has already signed in'})
+                dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'existed_session', None, None), transform=False)
         except:
+            self.set_status(400)
             self.write({'token':False, 'message':'Cannot Connect To Server'})
+            dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'login_error', None, None), transform=False)
 
 
 class ChangePassword(RequestHandler):
-    @coroutine
     def put(self):
         try:
             userEmail = self.get_body_argument('email')
@@ -77,13 +84,16 @@ class ChangePassword(RequestHandler):
                 self.write({'message':'Password Updated'})
                 dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(), 'change_password', None, None), transform=False)
             else:
+                self.set_status(403)
                 self.write({'message':'Token invalid'})
-        except MissingArgumentError:
-            self.write({'message':'Missing Email/Password'})
+                dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'token_error', None, None), transform=False)
+        except:
+            self.set_status(400)
+            self.write({ 'message':'Bad Request'})
+            dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'change_password_error', None, None), transform=False)
 
 
 class ScrapeAds(RequestHandler):
-    @coroutine
     def post(self):
         try:
             userEmail = self.get_body_argument('email')
@@ -96,24 +106,31 @@ class ScrapeAds(RequestHandler):
 
             if userToken == globals.active_users[userEmail].token:
                 if userEmail not in globals.active_users:
+                    self.set_status(202)
                     self.write({'message':'Request Accepted'})
                     globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
                     globals.active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
 
                 elif globals.active_users[userEmail].runAds == False:
+                    self.set_status(202)
                     self.write({'message':'Request Accepted'})
                     globals.active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
 
                 elif globals.active_users[userEmail].runAds == True:
+                    self.set_status(409)
                     self.write({'message':'Session Existed'})
+                    dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(), 'existed_ads_instance', None, None), transform=False)
             else:
+                self.set_status(403)
                 self.write({'message':'Wrong Token'})
-        except MissingArgumentError:
-            self.write({'message':'Missing Arguments'})
+                dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'token_error', None, None), transform=False)
+        except:
+            self.set_status(400)
+            self.write({'message':'Bad Request'})
+            dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'ads_request_error', None, None), transform=False)
 
 
 class ScrapeGroups(RequestHandler):
-    @coroutine
     def post(self):
         global user_ping
         try:
@@ -128,25 +145,32 @@ class ScrapeGroups(RequestHandler):
 
             if userToken == globals.active_users[userEmail].token:
                 if userEmail not in globals.active_users:
+                    self.set_status(202)
                     self.write({'message':'Request Accepted'})
                     globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
                     user_ping[userEmail] = datetime.datetime.now()
                     globals.active_users[userEmail].start('groups', fb_email, fb_pass, teleId, keywords, blacklistKeywords, groupIdList)
 
                 elif globals.active_users[userEmail].runGroups == False:
+                    self.set_status(202)
                     self.write({'message':'Request Accepted'})
                     globals.active_users[userEmail].start('groups', fb_email, fb_pass, teleId, keywords, blacklistKeywords, groupIdList)
 
                 elif globals.active_users[userEmail].runGroups == True:
+                    self.set_status(409)
                     self.write({'message':'Session Existed'})
+                    dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(), 'existed_groups_instance', None, None), transform=False)
             else:
+                self.set_status(403)
                 self.write({'message':'Wrong Token'})
-        except MissingArgumentError:
-            self.write({'message':'Missing Arguments'})
+                dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'token_error', None, None), transform=False)
+        except:
+            self.set_status(400)
+            self.write({'message':'Bad Request'})
+            dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'groups_request_error', None, None), transform=False)
 
 
 class StopScrape(RequestHandler):
-    @coroutine
     def post(self):
         try:
             userEmail = self.get_body_argument('email')
@@ -161,18 +185,23 @@ class StopScrape(RequestHandler):
             if userToken == globals.active_users[userEmail].token:
                 try:
                     globals.active_users[userEmail].stop(stopType, email, email2)
+                    self.set_status(202)
                     self.write({'message':'Session Stopped'})
                 except:
+                    self.set_status(409)
                     self.write({'message':'No Session Found'})
                 
             else:
+                self.set_status(403)
                 self.write({'message':'Wrong token'})
-        except MissingArgumentError:
-            self.write({'message':'Missing Arguments'})
+                dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'token_error', None, None), transform=False)
+        except:
+            self.set_status(400)
+            self.write({'message':'Bad Request'})
+            dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'stop_request_error', None, None), transform=False)
 
 
 class ExtractPosts(RequestHandler):
-    @coroutine
     def get(self):
         global globals
         try:
@@ -191,14 +220,17 @@ class ExtractPosts(RequestHandler):
                 else:
                     self.write({'message':'No data'})
             else:
-                self.write({'message':'Connection expired. Please sign-in again'})
+                self.set_status(400)
+                self.write({'message':'Wrong token'})
+                dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(), 'token_error', None, None), transform=False)
 
-        except MissingArgumentError:
-            self.write({'message':'Missing Arguments'})
+        except:
+            self.set_status(400)
+            self.write({'message':'Bad Request'})
+            dbconn.insert_app_event(('000000', userEmail, datetime.datetime.now(), 'stop_request_error', None, None), transform=False)
 
 
 class CloseApp(RequestHandler):
-    @coroutine
     def post(self):
         global user_ping, globals
         try:
@@ -214,11 +246,9 @@ class CloseApp(RequestHandler):
             else:
                 pass
 
-        except Exception as e:
-            if type(e).__name__ == 'MissingArgumentError':
-                self.write({'message':'Missing Arguments'})
-            else:
-                pass
+        except:
+            self.set_status(400)
+            self.write({'message':'Bad Request'})
 
 
 def make_app(debug=False, autoreload=False):
