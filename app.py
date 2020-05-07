@@ -3,24 +3,35 @@ sys.path.append(sys.path[0]+'\\venv\\Lib\\site-packages') # For Task Schedule
 
 from tornado.web import Application, RequestHandler
 from tornado.ioloop import IOLoop
+from tornado.gen import coroutine
 import asyncio
 from werkzeug.security import generate_password_hash, check_password_hash
 
-import datetime
+import datetime, threading, time
 import pandas as pd
 
 from db import DBConnection
 from instance import SeleniumInstance
 from utils import get_regex, push_tele, generate_string
-from accounts import *
+from accounts import versionAvailable
 import globals
 
 
 globals.initialize()
 dbconn = DBConnection()
 
+def clear():
+    global globals
+    while True:
+        time.sleep(60)
+        for user in globals.active_users:
+            if datetime.datetime.now() - globals.active_users[user].ping > datetime.timedelta(seconds=180):
+                dbconn.insert_app_event((globals.active_users[user].session, globals.active_users[user].userEmail, datetime.datetime.now(), 'session_timeout', None, None), transform=False)
+                del globals.active_users[user]
+        
 
 class Ping(RequestHandler):
+    @coroutine
     def get(self):
         try:
             userEmail = self.get_body_argument('email')
@@ -36,6 +47,7 @@ class DemoScreen(RequestHandler):
 
 
 class LoginHandler(RequestHandler):
+    @coroutine
     def get(self):
         try:
             userEmail = self.get_body_argument('email')
@@ -43,7 +55,7 @@ class LoginHandler(RequestHandler):
             userVersion = self.get_body_argument('version')
             if userEmail not in globals.active_users:
                 if userVersion in versionAvailable:
-                    email, password = dbconn.get_user(userEmail)
+                    _, password = dbconn.get_user(userEmail)
                     if password == '1':
                         isValid = userPassword == password
                     else:
@@ -94,6 +106,7 @@ class ChangePassword(RequestHandler):
 
 
 class ScrapeAds(RequestHandler):
+    @coroutine
     def post(self):
         try:
             userEmail = self.get_body_argument('email')
@@ -108,7 +121,7 @@ class ScrapeAds(RequestHandler):
                 if userEmail not in globals.active_users:
                     self.set_status(202)
                     self.write({'message':'Request Accepted'})
-                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
+                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), generate_string(), datetime.datetime.now())
                     globals.active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
 
                 elif globals.active_users[userEmail].runAds == False:
@@ -131,8 +144,8 @@ class ScrapeAds(RequestHandler):
 
 
 class ScrapeGroups(RequestHandler):
+    @coroutine
     def post(self):
-        global user_ping
         try:
             userEmail = self.get_body_argument('email')
             userToken = self.get_body_argument('token')
@@ -147,8 +160,7 @@ class ScrapeGroups(RequestHandler):
                 if userEmail not in globals.active_users:
                     self.set_status(202)
                     self.write({'message':'Request Accepted'})
-                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), datetime.datetime.now())
-                    user_ping[userEmail] = datetime.datetime.now()
+                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), generate_string(), datetime.datetime.now())
                     globals.active_users[userEmail].start('groups', fb_email, fb_pass, teleId, keywords, blacklistKeywords, groupIdList)
 
                 elif globals.active_users[userEmail].runGroups == False:
@@ -171,6 +183,7 @@ class ScrapeGroups(RequestHandler):
 
 
 class StopScrape(RequestHandler):
+    @coroutine
     def post(self):
         try:
             userEmail = self.get_body_argument('email')
@@ -231,20 +244,17 @@ class ExtractPosts(RequestHandler):
 
 
 class CloseApp(RequestHandler):
+    @coroutine
     def post(self):
-        global user_ping, globals
+        global globals
         try:
             userEmail = self.get_body_argument('email')
-            userToken = self.get_body_argument('token')
             email = self.get_body_argument('fb_email')
             email2 = self.get_body_argument('fb_email2')
             groupIdList = self.get_body_argument('group_id_list')
 
-            if userToken == globals.active_users[userEmail].token:
-                self.write({'message':''})
-                globals.active_users[userEmail].stop('both', email, email2, groupIdList)
-            else:
-                pass
+            self.write({'message':''})
+            globals.active_users[userEmail].stop('both', email, email2, groupIdList)
 
         except:
             self.set_status(400)
@@ -267,6 +277,7 @@ def make_app(debug=False, autoreload=False):
 
 
 if __name__ == '__main__':
+    threading.Thread(target=clear, daemon=True).start()
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     app = make_app()
     app.listen(8080)

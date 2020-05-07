@@ -9,11 +9,11 @@ from random_user_agent.user_agent import UserAgent
 from random_user_agent.params import SoftwareName, OperatingSystem
 
 from utils import get_regex, push_tele
-from accounts import *
+from accounts import telegramBotToken
 import globals
 
 import pandas as pd
-import time, datetime, threading, re, json, requests
+import time, datetime, threading, re, json, requests, random
 
 
 class SeleniumInstance:
@@ -46,12 +46,16 @@ class SeleniumInstance:
         self.options.add_argument(f'--user-agent={self.user_agent}')
 
 
+    @staticmethod
+    def standby():
+        time.sleep(random.uniform(1.0, 4.0))
+
+
     def start(self, _type, email, password, teleId, keywords, blacklistKeywords, groupIdList=None):
         if _type == 'ads':
             threading.Thread(target=self.scrape_ads, args=(email, password, teleId, keywords, blacklistKeywords,), daemon=True).start()
         elif _type == 'groups':
             threading.Thread(target=self.scrape_groups, args=(email, password, teleId, keywords, blacklistKeywords, groupIdList,), daemon=True).start()
-        threading.Thread(target=self.clear, daemon=True).start()
 
 
     def stop(self, _type, email, email2, groupIdList=None):
@@ -76,13 +80,6 @@ class SeleniumInstance:
 
             del globals.active_users[self.userEmail]
             self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'close_connection', None, None), transform=False)
-
-
-    def clear(self):
-        time.sleep(180)
-        if self.runAds == False and self.runGroups == False:
-            del globals.active_users[self.userEmail]
-            self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'session_timeout', None, None), transform=False)
 
 
     def log_in_facebook(self, driver, email, password):
@@ -114,7 +111,7 @@ class SeleniumInstance:
             try:
                 WebDriverWait(self.driverGroups, 20).until(EC.presence_of_all_elements_located((By.CLASS_NAME, '_4-u2')))
             except TimeoutException:
-                self.dbconn.insert_app_event((self.session, userEmail, datetime.datetime.now(), 'cannot_log_in', email, None), transform=False)
+                self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'cannot_log_in', email, None), transform=False)
                 self.runAds = False
                 self.driverGroups.close()
 
@@ -127,6 +124,7 @@ class SeleniumInstance:
                 else:
                     try:
                         for groupId in groupIdList:
+                            self.standby()
                             self.driverGroups.get(f'https://facebook.com/groups/{groupId.strip()}?sorting_setting=CHRONOLOGICAL')
                             posts = WebDriverWait(self.driverGroups, 5).until(EC.presence_of_all_elements_located((By.CLASS_NAME, 'userContentWrapper')))
                             for p in posts:
@@ -198,9 +196,9 @@ class SeleniumInstance:
                                     'text': err_text,
                                     'parse_mode': 'HTML'
                                 }
-                                requests.post(f"https://api.telegram.org/bot{teleId}/sendMessage", data=data)
+                                requests.post(f"https://api.telegram.org/bot{telegramBotToken}/sendMessage", data=data)
                         else:
-                            time.sleep(5)
+                            self.standby()
                             continue
 
 
@@ -255,9 +253,9 @@ class SeleniumInstance:
                                                 page = e.find_element_by_link_text(e.find_element_by_class_name('_7tae').text).get_attribute('href').split('/')[3]
                                             except:
                                                 if e.find_element_by_class_name('_7tae').text.find('like') != -1:
-                                                    page = e.find_element_by_link_text(re.sub('\.$', '', e.find_element_by_class_name('_7tae').text.split(' like ')[1])).get_attribute('href').split('/')[3]
+                                                    page = e.find_element_by_link_text(re.sub(r'\.$', '', e.find_element_by_class_name('_7tae').text.split(' like ')[1])).get_attribute('href').split('/')[3]
                                                 elif e.find_element_by_class_name('_7tae').text.find('thích') != -1:
-                                                    page = e.find_element_by_link_text(re.sub('\.$', '', e.find_element_by_class_name('_7tae').text.split(' thích ')[1])).get_attribute('href').split('/')[3]
+                                                    page = e.find_element_by_link_text(re.sub(r'\.$', '', e.find_element_by_class_name('_7tae').text.split(' thích ')[1])).get_attribute('href').split('/')[3]
 
                                         facebook = 'https://www.facebook.com/' + page
                                     
@@ -312,11 +310,11 @@ class SeleniumInstance:
                             finally:
                                 err_text = f"An {type(err).__name__} error occured.\nYour session have stopped."
                                 data = {
-                                    'chat_id': ExceptionReceiverTelegramId,
+                                    'chat_id': teleId,
                                     'text': err_text,
                                     'parse_mode': 'HTML'
                                 }
-                                requests.post(f"https://api.telegram.org/bot{teleId}/sendMessage", data=data)
+                                requests.post(f"https://api.telegram.org/bot{telegramBotToken}/sendMessage", data=data)
                         else:
-                            time.sleep(5)
+                            self.standby()
                             continue
