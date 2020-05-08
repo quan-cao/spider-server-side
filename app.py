@@ -252,9 +252,11 @@ class CloseApp(RequestHandler):
             email = self.get_body_argument('fb_email')
             email2 = self.get_body_argument('fb_email2')
             groupIdList = self.get_body_argument('group_id_list')
+            token = self.get_body_argument('token')
 
-            self.write({'message':''})
-            globals.active_users[userEmail].stop('both', email, email2, groupIdList)
+            if token == globals.active_users[userEmail].token:
+                self.write({'message':''})
+                globals.active_users[userEmail].stop('both', email, email2, groupIdList)
 
         except:
             self.set_status(400)
