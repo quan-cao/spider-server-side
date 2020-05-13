@@ -8,6 +8,7 @@ def get_regex(kwVar, blacklist=False):
         for kw in kwVarList:
             kwList.append(kw.strip())
         kwRegex = '|'.join(kwList)
+        kwRegex = '\\b' + kwRegex + '\\b'
         return kwRegex
     else:
         if blacklist:
