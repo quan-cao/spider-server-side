@@ -48,7 +48,7 @@ class SeleniumInstance:
 
     @staticmethod
     def standby():
-        time.sleep(random.uniform(1.0, 4.0))
+        time.sleep(random.uniform(1.0, 3.0))
 
 
     def start(self, _type, email, password, teleId, keywords, blacklistKeywords, groupIdList=None):
@@ -98,11 +98,11 @@ class SeleniumInstance:
     def scrape_groups(self, email, password, teleId, keywords, blacklistKeywords, groupIdList):
         self.runGroups = True
 
+        self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'start_scrape_groups', email, groupIdList), transform=False)
+
         kwRegex = get_regex(keywords)
         blacklistKwRegex = get_regex(blacklistKeywords, blacklist=True)
         groupIdList = groupIdList.split(',')
-
-        self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'start_scrape_groups', email, groupIdList), transform=False)
 
         self.driverGroups = webdriver.Chrome(options=self.options)
         login = self.log_in_facebook(self.driverGroups, email, password)
@@ -116,7 +116,7 @@ class SeleniumInstance:
                 self.driverGroups.close()
 
             oldUsers = pd.read_pickle(self.hubspot_contact_path).id.tolist()
-            dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'phone', 'post', 'content', 'group', 'user_email'])
+            dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email'])
 
             while self.runGroups:
                 if datetime.datetime.now() - self.ping > datetime.timedelta(seconds=30):
@@ -124,12 +124,13 @@ class SeleniumInstance:
                 else:
                     try:
                         for groupId in groupIdList:
-                            self.standby()
                             self.driverGroups.get(f'https://facebook.com/groups/{groupId.strip()}?sorting_setting=CHRONOLOGICAL')
-                            posts = WebDriverWait(self.driverGroups, 5).until(EC.presence_of_all_elements_located((By.CLASS_NAME, 'userContentWrapper')))
+                            posts = WebDriverWait(self.driverGroups, 5).until(EC.presence_of_element_located((By.CLASS_NAME, 'userContentWrapper')))
                             for p in posts:
-                                if (p.text.find('Vừa xong') != -1) or (p.text.find('1 phút') != -1) or (p.text.find(' 2 phút') != -1) or \
-                                    (p.text.find('Just now') != -1) or (p.text.find('1 min') != -1) or (p.text.find(' 2 mins') != -1):
+                                if (p.find_element_by_class_name('_5ptz')
+                                    .find_element_by_class_name('timestampContent')
+                                    .text in ['Vừa xong', '1 phút', '2 phút', '3 phút', '4 phút', '5 phút',
+                                              'Just now', '1 min', '2 mins', '3 mins', '4 mins', '5 mins']):
 
                                     try:
                                         p.find_element_by_class_name('see_more_link_inner').click()
@@ -165,7 +166,8 @@ class SeleniumInstance:
                                                 except:
                                                     break
 
-                                                post_time = pd.to_datetime(p.find_element_by_class_name('_5ptz').get_attribute('data-utime'), unit='s') + pd.DateOffset(hour=16)
+                                                post_time = (pd.to_datetime(p.find_element_by_class_name('_5ptz').get_attribute('data-utime'), unit='s')
+                                                            + datetime.timedelta(hours=7))
 
                                                 dataframe = dataframe.append({'imported_time': post_time, 'type':'groups', 'profile':profile, 'post':post,
                                                                             'phone':phone, 'content':content, 'group':groupId, 'user_email':self.userEmail}, ignore_index=True)
@@ -175,14 +177,15 @@ class SeleniumInstance:
                             dataframe = dataframe.drop_duplicates(subset='content', keep='first')
                             oldPosts = self.dbconn.get_all_posts(self.userEmail, "groups", 'CURRENT_DATE')
                             if oldPosts == '[]':
-                                oldPosts = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'phone', 'post', 'content', 'group', 'user_email'])
+                                oldPosts = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email'])
                             else:
                                 oldPosts = pd.json_normalize(json.loads(oldPosts))
                             dataframe = dataframe[(~dataframe.post.isin(oldPosts.post.tolist())) & (~dataframe.content.isin(oldPosts.content.tolist()))]
                             if len(dataframe) > 0:
                                 push_tele(teleId, 'groups', df=dataframe)
                                 self.dbconn.insert_fb_posts(dataframe)
-                            dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'phone', 'post', 'content', 'group', 'user_email'])
+                            dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email'])
+                            self.standby()
                     except Exception as err:
                         if type(err).__name__ in ['InvalidSessionIdException', 'NoSuchWindowException', 'ProtocolError']:
                             try:
@@ -205,11 +208,10 @@ class SeleniumInstance:
     def scrape_ads(self, email, password, teleId, keywords, blacklistKeywords):
         self.runAds = True
 
-        # Get keywords
+        self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'start_scrape_ads', email, None), transform=False)
+
         kwRegex = get_regex(keywords)
         blacklistKwRegex = get_regex(blacklistKeywords, blacklist=True)
-
-        self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'start_scrape_ads', email, None), transform=False)
 
         self.driverAds = webdriver.Chrome(options=self.options)
         login = self.log_in_facebook(self.driverAds, email, password)
@@ -295,6 +297,7 @@ class SeleniumInstance:
                                                 phones = None
 
                                             if checkPhone == 0:
+                                                phones = ','.join(phones)
                                                 self.dbconn.insert_fb_posts([(datetime.datetime.now(), 'ads', facebook, None, phones,
                                                                         None, None, self.userEmail)], transform=False)
                                                 push_tele(teleId, 'ads', name, facebook, phones)

@@ -1,9 +1,8 @@
-dbName = 'database_name'
-dbUser = 'user_name'
-dbPassword = 'database_password'
+dbName = 'your_database_name'
+dbUser = 'your_user_name'
+dbPassword = 'your_database_password'
 
-telegramBotToken = 'bot_token'
-ExceptionReceiverTelegramId = 'telegram_id'
+telegramBotToken = 'your_bot_token'
 
 versionAvailable = [
     'your',
