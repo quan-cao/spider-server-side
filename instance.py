@@ -125,7 +125,7 @@ class SeleniumInstance:
                     try:
                         for groupId in groupIdList:
                             self.driverGroups.get(f'https://facebook.com/groups/{groupId.strip()}?sorting_setting=CHRONOLOGICAL')
-                            posts = WebDriverWait(self.driverGroups, 5).until(EC.presence_of_element_located((By.CLASS_NAME, 'userContentWrapper')))
+                            posts = WebDriverWait(self.driverGroups, 5).until(EC.presence_of_all_elements_located((By.CLASS_NAME, 'userContentWrapper')))
                             for p in posts:
                                 if (p.find_element_by_class_name('_5ptz')
                                     .find_element_by_class_name('timestampContent')
@@ -271,7 +271,7 @@ class SeleniumInstance:
 
                                         if isNew:
                                             # Get page info
-                                            self.driverAds.execute_script(f"window.open('{'https://www.facebook.com/' + page + '/about?ref=page_internal'}');")
+                                            self.driverAds.execute_script(f"window.open('{facebook + '/about?ref=page_internal'}');")
                                             self.driverAds.switch_to.window(self.driverAds.window_handles[-1])
                                             name = WebDriverWait(self.driverAds, 20).until(EC.presence_of_element_located((By.CLASS_NAME, '_64-f'))).text
                                             checkPhone = 0
