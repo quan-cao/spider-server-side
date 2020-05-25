@@ -8,13 +8,15 @@ from selenium.webdriver.common.by import By
 from random_user_agent.user_agent import UserAgent
 from random_user_agent.params import SoftwareName, OperatingSystem
 
-from utils import get_regex, push_tele
-from accounts import telegramBotToken
+from utils import get_regex
+from telegramBot import TelegramBot
 import globals
 
 import pandas as pd
 import time, datetime, threading, re, json, requests, random
 
+
+bot = TelegramBot('config.ini', '/')
 
 class SeleniumInstance:
     def __init__(self, userEmail, dbconn, token, session, ping):
@@ -59,23 +61,22 @@ class SeleniumInstance:
 
 
     def stop(self, _type, email, email2, groupIdList=None):
-        global globals
         if _type == 'ads':
             self.runAds = False
-            self.driverAds.close()
+            self.driverAds.quit()
             self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'stop_scrape_ads', email, None), transform=False)
         elif _type == 'groups':
             self.runGroups = False
-            self.driverGroups.close()
+            self.driverGroups.quit()
             self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'stop_scrape_groups', email2, groupIdList), transform=False)
         elif _type == 'both':
             if self.runAds == True:
                 self.runAds = False
-                self.driverAds.close()
+                self.driverAds.quit()
                 self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'stop_scrape_ads', email, None), transform=False)
             if self.runGroups == True:
                 self.runGroups = False
-                self.driverGroups.close()
+                self.driverGroups.quit()
                 self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'stop_scrape_groups', email2, groupIdList), transform=False)
 
             del globals.active_users[self.userEmail]
@@ -113,7 +114,8 @@ class SeleniumInstance:
             except TimeoutException:
                 self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'cannot_log_in', email, None), transform=False)
                 self.runAds = False
-                self.driverGroups.close()
+                self.driverGroups.quit()
+                bot.send_message('Failed to login Facebook account', teleId)
 
             oldUsers = pd.read_pickle(self.hubspot_contact_path).id.tolist()
             dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email'])
@@ -135,7 +137,10 @@ class SeleniumInstance:
                                     try:
                                         p.find_element_by_class_name('see_more_link_inner').click()
                                     except:
-                                        pass
+                                        try:
+                                            p.find_element_by_class_name('_6tw8').click()
+                                        except:
+                                            pass
 
                                     content = p.find_element_by_class_name('userContent').text
                                     if content == '':
@@ -170,36 +175,33 @@ class SeleniumInstance:
                                                             + datetime.timedelta(hours=7))
 
                                                 dataframe = dataframe.append({'imported_time': post_time, 'type':'groups', 'profile':profile, 'post':post,
-                                                                            'phone':phone, 'content':content, 'group':groupId, 'user_email':self.userEmail}, ignore_index=True)
+                                                                            'phone':phone, 'content':content, 'group':groupId, 'user_email':self.userEmail,
+                                                                            'is_sent':'true'}, ignore_index=True)
                                         else:
-                                            continue
+                                            dataframe = dataframe.append({'imported_time': post_time, 'type':'groups', 'profile':profile, 'post':post,
+                                                                        'phone':phone, 'content':content, 'group':groupId, 'user_email':self.userEmail,
+                                                                        'is_sent':'false'}, ignore_index=True)
                             dataframe = dataframe.drop_duplicates(subset='post', keep='first')
                             dataframe = dataframe.drop_duplicates(subset='content', keep='first')
                             oldPosts = self.dbconn.get_all_posts(self.userEmail, "groups", 'CURRENT_DATE')
                             if oldPosts == '[]':
-                                oldPosts = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email'])
+                                oldPosts = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email', 'is_sent'])
                             else:
                                 oldPosts = pd.json_normalize(json.loads(oldPosts))
                             dataframe = dataframe[(~dataframe.post.isin(oldPosts.post.tolist())) & (~dataframe.content.isin(oldPosts.content.tolist()))]
                             if len(dataframe) > 0:
-                                push_tele(teleId, 'groups', df=dataframe)
+                                bot.push_tele(teleId, 'groups', df=dataframe)
                                 self.dbconn.insert_fb_posts(dataframe)
-                            dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email'])
+                            dataframe = pd.DataFrame(columns=['imported_time', 'type', 'profile', 'post', 'phone', 'content', 'group', 'user_email', 'is_sent'])
                             self.standby()
                     except Exception as err:
                         if type(err).__name__ in ['InvalidSessionIdException', 'NoSuchWindowException', 'ProtocolError']:
                             try:
-                                self.driverAds.close()
+                                self.driverGroups.quit()
                             except:
                                 break
                             finally:
-                                err_text = f"An {type(err).__name__} error occured.\nYour session have stopped."
-                                data = {
-                                    'chat_id': teleId,
-                                    'text': err_text,
-                                    'parse_mode': 'HTML'
-                                }
-                                requests.post(f"https://api.telegram.org/bot{telegramBotToken}/sendMessage", data=data)
+                                bot.send_message('Your session has stopped', teleId)
                         else:
                             self.standby()
                             continue
@@ -220,13 +222,14 @@ class SeleniumInstance:
             try:
                 WebDriverWait(self.driverAds, 20).until(EC.presence_of_all_elements_located((By.CLASS_NAME, '_4-u2')))
             except Exception as e:
-                if type(e).__name__ == TimeoutException:
+                if type(e).__name__ == 'TimeoutException':
                     self.dbconn.insert_app_event((self.session, self.userEmail, datetime.datetime.now(), 'cannot_log_in', email, None), transform=False)
+                    bot.send_message('Failed t ologin Facebook account', teleId)
                 else:
                     pass
                 self.runAds = False
                 try:
-                    self.driverAds.close()
+                    self.driverAds.quit()
                 except:
                     pass
 
@@ -241,23 +244,28 @@ class SeleniumInstance:
                             self.driverAds.switch_to.window(self.driverAds.window_handles[-1])
                             self.driverAds.close()
                         self.driverAds.get('https://www.facebook.com')
-                        for _ in range(30):
-                            time.sleep(1)
-                            elems = WebDriverWait(self.driverAds, 20).until(EC.presence_of_all_elements_located((By.CLASS_NAME, '_4-u2')))
-                            self.driverAds.switch_to.active_element.send_keys(Keys.PAGE_DOWN)
-                            for e in elems[7:]:
+                        previousLast = ''
+                        for _ in range(20):
+                            time.sleep(5)
+                            elems = WebDriverWait(self.driverAds, 10).until(EC.presence_of_all_elements_located((By.CLASS_NAME, '_4-u2')))
+                            self.driverAds.switch_to.active_element.send_keys(Keys.END)
+                            nextIdx = elems.index(previousLast)+1 if previousLast != '' else 0
+                            for e in elems[nextIdx:]:
                                 if (e.text != '') and (e.text.find('Sponsored') != -1 or e.text.find('Được tài trợ') != -1):
                                     if not re.findall(blacklistKwRegex, e.text, re.IGNORECASE) and re.findall(kwRegex, e.text, re.IGNORECASE):
                                         try:
-                                            page = WebDriverWait(e, 20).until(EC.presence_of_element_located((By.CLASS_NAME, '_5pb8'))).get_attribute('href').split('/')[3]
-                                        except:
                                             try:
-                                                page = e.find_element_by_link_text(e.find_element_by_class_name('_7tae').text).get_attribute('href').split('/')[3]
+                                                page = WebDriverWait(e, 10).until(EC.presence_of_element_located((By.CLASS_NAME, '_5pb8'))).get_attribute('href').split('/')[3]
                                             except:
-                                                if e.find_element_by_class_name('_7tae').text.find('like') != -1:
-                                                    page = e.find_element_by_link_text(re.sub(r'\.$', '', e.find_element_by_class_name('_7tae').text.split(' like ')[1])).get_attribute('href').split('/')[3]
-                                                elif e.find_element_by_class_name('_7tae').text.find('thích') != -1:
-                                                    page = e.find_element_by_link_text(re.sub(r'\.$', '', e.find_element_by_class_name('_7tae').text.split(' thích ')[1])).get_attribute('href').split('/')[3]
+                                                try:
+                                                    page = e.find_element_by_link_text(e.find_element_by_class_name('_7tae').text).get_attribute('href').split('/')[3]
+                                                except:
+                                                    if e.find_element_by_class_name('_7tae').text.find('like') != -1:
+                                                        page = e.find_element_by_link_text(re.sub(r'\.$', '', e.find_element_by_class_name('_7tae').text.split(' like ')[1])).get_attribute('href').split('/')[3]
+                                                    elif e.find_element_by_class_name('_7tae').text.find('thích') != -1:
+                                                        page = e.find_element_by_link_text(re.sub(r'\.$', '', e.find_element_by_class_name('_7tae').text.split(' thích ')[1])).get_attribute('href').split('/')[3]
+                                        except:
+                                            continue
 
                                         facebook = 'https://www.facebook.com/' + page
                                     
@@ -297,27 +305,30 @@ class SeleniumInstance:
                                                 phones = None
 
                                             if checkPhone == 0:
-                                                phones = ','.join(phones)
+                                                if phones is not None:
+                                                    phones = ','.join(phones)
                                                 self.dbconn.insert_fb_posts([(datetime.datetime.now(), 'ads', facebook, None, phones,
-                                                                        None, None, self.userEmail)], transform=False)
-                                                push_tele(teleId, 'ads', name, facebook, phones)
+                                                                        None, None, self.userEmail, True)], transform=False)
+                                                bot.push_tele(teleId, 'ads', name, facebook, phones)
+                                            
+                                            else:
+                                                if phones is not None:
+                                                    phones = ','.join(phones)
+                                                self.dbconn.insert_fb_posts([(datetime.datetime.now(), 'ads', facebook, None, phones,
+                                                                        None, None, self.userEmail, False)], transform=False)
 
                                             self.driverAds.close()
                                             self.driverAds.switch_to.window(self.driverAds.window_handles[0])
+                            previousLast = elems[-1]
                     except Exception as err:
                         if type(err).__name__ in ['InvalidSessionIdException', 'NoSuchWindowException', 'ProtocolError']:
                             try:
-                                self.driverAds.close()
+                                self.driverAds.quit()
                             except:
-                                break
+                                pass
                             finally:
-                                err_text = f"An {type(err).__name__} error occured.\nYour session have stopped."
-                                data = {
-                                    'chat_id': teleId,
-                                    'text': err_text,
-                                    'parse_mode': 'HTML'
-                                }
-                                requests.post(f"https://api.telegram.org/bot{telegramBotToken}/sendMessage", data=data)
+                                bot.send_message('Your session has stopped', teleId)
+                                break
                         else:
                             self.standby()
                             continue

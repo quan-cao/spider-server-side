@@ -6,15 +6,15 @@ import json, datetime
 import pandas as pd
 import numpy as np
 
-from accounts import *
-
+import utils.readConfig as cfg
 
 class DBConnection:
     def __init__(self):
+        dbData = cfg.get_section('config.ini', 'db')
         self.pg_pool = pool.SimpleConnectionPool(20, 100,
-                                            database = dbName,
-                                            user = dbUser,
-                                            password = dbPassword)
+                                            database = dbData['dbName'],
+                                            user = dbData['dbUser'],
+                                            password = dbData['dbPassword'])
     
 
     @staticmethod
@@ -22,7 +22,7 @@ class DBConnection:
         """
         Returns a list of tuples of values to insert into DB.
         """
-        data = data.replace({np.nan: None, 'None': None})
+        data = data.replace({np.nan: None, 'None': None, '': None})
         values = []
         for i in range(len(data)):
             values.append(tuple(data.iloc[i].values.tolist()))
@@ -41,12 +41,14 @@ class DBConnection:
         if self.pg_pool:
             conn = self.pg_pool.getconn()
             if conn:
-                cur = conn.cursor()
-                cur.executemany('INSERT INTO fb_posts VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING', data)
-                conn.commit()
-                cur.close()
-                self.pg_pool.putconn(conn)
-
+                try:
+                    cur = conn.cursor()
+                    cur.executemany('INSERT INTO fb_posts VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING', data)
+                    conn.commit()
+                    cur.close()
+                    self.pg_pool.putconn(conn)
+                except Exception as e:
+                    print(str(e))
 
     def insert_app_event(self, data, transform=True):
         """
@@ -84,11 +86,30 @@ class DBConnection:
             conn = self.pg_pool.getconn()
             if conn:
                 cur = conn.cursor()
-                cur.execute(f"SELECT * FROM users WHERE email = '{email}'")
+                cur.execute(f"SELECT email, password FROM users WHERE email = '{email}'")
                 userEmail, userPassword = cur.fetchone()
                 cur.close()
                 self.pg_pool.putconn(conn)
                 return userEmail, userPassword
+
+
+    def get_staff(self, telegramId):
+        """
+        Returns email, staff, hubspot_id
+        """
+        if self.pg_pool:
+            conn = self.pg_pool.getconn()
+            if conn:
+                cur = conn.cursor()
+                cur.execute(f"SELECT email, staff, hubspot_id FROM users WHERE telegram_id = '{telegramId}'")
+                try:
+                    email, staff, hubspot_id = cur.fetchone()
+                except:
+                    email, staff, hubspot_id = None, None, None
+                finally:
+                    cur.close()
+                    self.pg_pool.putconn(conn)
+                    return email, staff, hubspot_id
 
 
     def get_posts(self, email, _type, fromTime, toTime):
@@ -103,11 +124,13 @@ class DBConnection:
                 conn = self.pg_pool.getconn()
                 if conn:
                     cur = conn.cursor(cursor_factory=RealDictCursor)
-                    cur.execute(f"SELECT * FROM fb_posts \
+                    cur.execute(f"SELECT imported_time, type, profile, post, phone, content, group FROM fb_posts \
                         WHERE user_email = '{email}' and \
                         date_trunc('day', imported_time) >= '{fromTime}'::date and \
                         date_trunc('day', imported_time) <= '{toTime}'::date and \
-                        type = '{_type.lower()}'")
+                        type = '{_type.lower()}' \
+                        and (is_sent = True \
+                            or is_sent is null)")
                     data = json.dumps(cur.fetchall(), default=self.convert_for_json, ensure_ascii=False)
                     cur.close()
                     self.pg_pool.putconn(conn)
@@ -160,6 +183,19 @@ class DBConnection:
                 cur.close()
                 self.pg_pool.putconn(conn)
                 return data
+
+
+    def insert_telegram_command(self, data, transform=True):
+        if transform == True:
+            data = self.transform_data(data)
+        if self.pg_pool:
+            conn = self.pg_pool.getconn()
+            if conn:
+                cur = conn.cursor()
+                cur.execute('INSERT INTO telegram_command VALUES (%s, %s, %s, %s)', data)
+                conn.commit()
+                cur.close()
+                self.pg_pool.putconn(conn)
 
 
     def __del__(self):

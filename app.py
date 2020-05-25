@@ -7,28 +7,32 @@ from tornado.gen import coroutine
 import asyncio
 from werkzeug.security import generate_password_hash, check_password_hash
 
-import datetime, threading, time
+import datetime, threading, time, json, re, pickle
 import pandas as pd
 
+from telegramBot import TelegramBot
 from db import DBConnection
 from instance import SeleniumInstance
-from utils import get_regex, push_tele, generate_string
-from accounts import versionAvailable
+from utils import get_regex, generate_string
+from versions import versionAvailable
 import globals
 
 
-globals.initialize()
 dbconn = DBConnection()
+bot = TelegramBot('config.ini', '/telegram-message')
+serverStartTime = int(time.mktime(datetime.datetime.now().timetuple()))
 
 def clear():
-    global globals
     while True:
-        time.sleep(60)
-        for user in globals.active_users:
-            if datetime.datetime.now() - globals.active_users[user].ping > datetime.timedelta(seconds=180):
-                dbconn.insert_app_event((globals.active_users[user].session, globals.active_users[user].userEmail, datetime.datetime.now(), 'session_timeout', None, None), transform=False)
-                del globals.active_users[user]
-        
+        try:
+            for user in globals.active_users:
+                if datetime.datetime.now() - globals.active_users[user].ping > datetime.timedelta(seconds=180):
+                    dbconn.insert_app_event((globals.active_users[user].session, globals.active_users[user].userEmail, datetime.datetime.now(), 'session_timeout', None, None), transform=False)
+                    del globals.active_users[user]
+            time.sleep(60)
+        except:
+            time.sleep(5)
+            continue
 
 class Ping(RequestHandler):
     @coroutine
@@ -216,7 +220,6 @@ class StopScrape(RequestHandler):
 
 class ExtractPosts(RequestHandler):
     def get(self):
-        global globals
         try:
             userEmail = self.get_body_argument('email')
             userToken = self.get_body_argument('token')
@@ -246,21 +249,191 @@ class ExtractPosts(RequestHandler):
 class CloseApp(RequestHandler):
     @coroutine
     def post(self):
-        global globals
         try:
             userEmail = self.get_body_argument('email')
             email = self.get_body_argument('fb_email')
             email2 = self.get_body_argument('fb_email2')
             groupIdList = self.get_body_argument('group_id_list')
-            token = self.get_body_argument('token')
 
-            if token == globals.active_users[userEmail].token:
-                self.write({'message':''})
+            self.write({'message':'App closed'})
+            try:
                 globals.active_users[userEmail].stop('both', email, email2, groupIdList)
+            except:
+                pass
 
         except:
             self.set_status(400)
             self.write({'message':'Bad Request'})
+
+
+class ForceClose(RequestHandler):
+    def post(self):
+        try:
+            userEmail = self.get_body_argument('email')
+            self.write({'message':'Force Close'})
+            globals.active_users[userEmail].stop('both', None, None, None)
+        except:
+            self.set_status(400)
+            self.write({'message':'Bad Request'})
+
+
+class TelegramMessage(RequestHandler):
+    @coroutine
+    def post(self):
+        self.set_status(200)
+        self.write({'message':'OK'})
+
+        try:
+            json.loads(self.request.body.decode())["edited_message"]
+            return None
+        except:
+            pass
+        
+        message = json.loads(self.request.body.decode())["message"]
+        if message["date"] < serverStartTime:
+            return None
+        
+        telegramId = message["from"]["id"]
+        text = message["text"]
+        if text.startswith('/c'):
+            try:
+                user_email, growth_staff, hubspot_owner_id = dbconn.get_staff(telegramId)
+                if growth_staff is None or hubspot_owner_id is None:
+                    bot.send_message('Tạo contact thất bại', telegramId)
+                    return None
+
+                textSplit = text.split(' ')
+                if len(textSplit) < 3:
+                    bot.send_message('Câu lệnh không hợp lệ', telegramId)
+                    dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                    return None
+
+                phone = re.sub(r'\D', '', textSplit[1])
+                phone = re.sub(r'^(0|\+84)', '84', phone)
+                if re.search(r'\b(84[-.\s]?\d{9})\b', phone) is None:
+                    bot.send_message('Tạo contact thất bại: Số điện thoại không hợp lệ', telegramId)
+                    dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                    return None
+
+                email = phone + "@gmail.com"
+                if textSplit[-1].lower() in ['t', 'tool', 'tools']:
+                    growth_source = "Tool"
+                elif textSplit[-1].lower() in ['d', 'direct', 'direct sale', 'direct sales', 'directs']:
+                    growth_source = "Direct Sale"
+                else:
+                    bot.send_message('Tạo contact thất bại: Thiếu nguồn khách hàng', telegramId)
+                    dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                    return None
+
+                if len(textSplit) > 3:
+                    firstname = ' '.join([part for part in textSplit[2:-1] if part.find("@gmail.com") == -1]).strip()
+                    if not firstname:
+                        firstname = phone
+                else:
+                    firstname = phone
+
+                aha_email = (textSplit[-2] if textSplit[-2].find("@gmail.com") != -1 else None)
+
+                with open('C:\\Works\\repos\\playground\\hubspot_contact', 'rb') as f:
+                    users = pickle.load(f)
+                data = users[users.id == phone]
+
+                if len(data) != 0:
+                    bot.send_message('Tạo contact thất bại: Contact đã tồn tại', telegramId)
+                    return None
+
+                if aha_email:
+                    response = bot.create_hubspot_contact(email=email, firstname=firstname, growth_staff=growth_staff, growth_source=growth_source, aha_email=aha_email, hubspot_owner_id=hubspot_owner_id)
+                else:
+                    response = bot.create_hubspot_contact(email=email, firstname=firstname, growth_staff=growth_staff, growth_source=growth_source, hubspot_owner_id=hubspot_owner_id)
+                    
+                if response.status_code == 409:
+                    bot.send_message('Tạo contact thất bại: Contact đã tồn tại', telegramId)
+                    dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                elif response.status_code == 200:
+                    bot.send_message('Tạo contact thành công', telegramId)
+                    dbconn.insert_telegram_command((datetime.datetime.now(), text, True, user_email), transform=False)
+                else:
+                    bot.send_message('Tạo contact thất bại', telegramId)
+                    bot.send_message(f'Failed from {user_email}\nSyntax: {text}\nReason:{response.content.decode()}', '807358017')
+                    dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                return None
+            except Exception as e:
+                bot.send_message('Tạo contact thất bại', telegramId)
+                bot.send_message(f'Failed from {user_email}\nReason: {str(e)}', '807358017')
+            finally:
+                self.set_status(200)
+                self.write({'message':'OK'})
+                return None
+
+        elif text.startswith('/i'):
+            try:
+                user_email, growth_staff, hubspot_owner_id = dbconn.get_staff(telegramId)
+                if growth_staff is None or hubspot_owner_id is None:
+                    bot.send_message('Tra cứu thất bại', telegramId)
+                    return None
+
+                textSplit = text.split(' ')
+                if len(textSplit) > 2 or len(textSplit) == 1:
+                    bot.send_message("Sai cú pháp", telegramId)
+                    dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                else:
+                    user_id = re.sub(r'\D', '', textSplit[1])
+                    user_id = re.sub(r'^(0|\+84)', '84', user_id)
+                    if re.search(r'\b(84[-.\s]?\d{9})\b', user_id) is None:
+                        bot.send_message('Tra cứu thất bại: Số điện thoại không hợp lệ', telegramId)
+                        dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                        return None
+
+                    with open('C:\\Works\\repos\\playground\\hubspot_contact', 'rb') as f:
+                        users = pickle.load(f)
+                    data = users[users.id == user_id]
+
+                    if len(data) == 0:
+                        bot.send_message('User không tồn tại', telegramId)
+                        return None
+
+                    create_time = data.create_time.iloc[0]
+                    last_order = data.last_order.iloc[0].ceil(freq='s')
+                    growth_staff = data.growth_staff.iloc[0]
+
+                    if (last_order is pd.NaT) and ((datetime.datetime.now() - create_time).days > 2):
+                        transferable = True
+                    else:
+                        transferable = False
+
+                    if (datetime.datetime.now() - last_order).days > 56:
+                        reactivatable = True
+                    else:
+                        reactivatable = False
+
+                    text = f"""
+<b>User ID:</b> {user_id}
+<b>Transferable:</b> {transferable}
+<b>Reactivatable:</b> {reactivatable}
+
+<b>Growth staff:</b> {growth_staff if growth_staff is not pd.NA else 'None'}
+<b>Create time:</b> {create_time}
+<b>Last order:</b> {last_order}"""
+                    bot.send_message(text, telegramId)
+            except Exception as e:
+                bot.send_message('Tra cứu thất bại', telegramId)
+                bot.send_message(f'Failed from {user_email}\nReason: {str(e)}', '807358017')
+            finally:
+                self.set_status(200)
+                self.write({'message':'OK'})
+                return None
+
+class WhoRun(RequestHandler):
+    def get(self):
+        dictWhoRun = {}
+        for user, instance in globals.active_users.items():
+            data = {
+                "run-ads": instance.runAds,
+                "run-groups": instance.runGroups
+            }
+            dictWhoRun[user] = data
+        self.write(dictWhoRun)
 
 
 def make_app(debug=False, autoreload=False):
@@ -273,6 +446,9 @@ def make_app(debug=False, autoreload=False):
         ('/api/extract-posts', ExtractPosts),
         ('/change-password', ChangePassword),
         ('/close-app', CloseApp),
+        ('/force-close', ForceClose),
+        ('/telegram-message', TelegramMessage),
+        ('/who-run', WhoRun),
         ('/', DemoScreen)
     ]
     return Application(urls, debug=debug, autoreload=autoreload)
