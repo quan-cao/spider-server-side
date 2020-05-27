@@ -66,9 +66,8 @@ class LoginHandler(RequestHandler):
                         isValid = check_password_hash(password, userPassword)
 
                     if isValid:
-                        token = generate_string()
-                        globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, token, generate_string(6), datetime.datetime.now())
-                        self.write({'token':token})
+                        globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn)
+                        self.write({'token':globals.active_users[userEmail].token})
                         dbconn.insert_app_event((globals.active_users[userEmail].session, userEmail, datetime.datetime.now(), 'logged_in', None, None), transform=False)
                     else:
                         self.set_status(401)
