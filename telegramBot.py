@@ -10,7 +10,7 @@ class TelegramBot:
         self.config = config
         self.route = route
         self.telegramBotToken = cfg.get_one(self.config, 'telegram', 'token')
-        self.telegramEndpoint = f'https://api.telegram.org/bot{self.telegramBotToken}/'
+        self.telegramEndpoint = f'https://api.telegram.org/bot{self.telegramBotToken}'
         self.hapikey = cfg.get_one(self.config, 'hubspot', 'hapikey')
         self.hubspotEndpoint = f'https://api.hubapi.com/contacts/v1/contact/?hapikey={self.hapikey}'
 
@@ -22,7 +22,7 @@ class TelegramBot:
             'parse_mode': parse_mode,
             'disable_web_page_preview': disable_preview
         }
-        response = requests.post(self.telegramEndpoint + 'sendMessage', data=data)
+        response = requests.post(self.telegramEndpoint + '/sendMessage', data=data)
         return response
 
 
@@ -45,12 +45,11 @@ class TelegramBot:
 
     def set_webhook(self):
         """
-        Set webhook for Telegram bot. New messages will be sent to `target_url` via HTTP POST requests.
+        Set webhook for Telegram bot. New messages will be sent to webhook url via HTTP POST requests.
 
         When using webhook, getUpdates method will be disabled.
         """
-        target_url = self.get_target_url()
-        response = requests.get(self.telegramEndpoint + 'setWebhook?url=' + target_url + self.route)
+        response = requests.get(f"{self.telegramEndpoint}/setWebhook?url={self.get_webhook_url}")
         return response
 
 
@@ -59,11 +58,11 @@ class TelegramBot:
         Remove webhook integration with Telegram Bot.
         """
 
-        response = requests.post(self.telegramEndpoint + 'deleteWebhook')
+        response = requests.post(self.telegramEndpoint + '/deleteWebhook')
         return response
 
 
-    def get_target_url(self):
+    def get_webhook_url(self) -> str:
         """
         Returns target url got from Google Sheet
         """
@@ -76,7 +75,7 @@ class TelegramBot:
 
         response = requests.get(sheet).json()
         domain = 'https://{}.localhost.run'.format(response['values'][0][0])
-        return domain + '/telegram-message'
+        return domain + self.route
 
 
     def push_tele(self, teleId, _type, name=None, facebook=None, phone=None, df=None):
@@ -95,7 +94,7 @@ class TelegramBot:
                 'parse_mode': 'HTML',
                 'disable_web_page_preview': True
             }
-            response = requests.post(self.telegramEndpoint + 'sendMessage', data=data)
+            response = requests.post(self.telegramEndpoint + '/sendMessage', data=data)
             return response
 
 
@@ -120,5 +119,5 @@ class TelegramBot:
                     'parse_mode': 'HTML',
                     'disable_web_page_preview': True
                 }
-                response = requests.post(self.telegramEndpoint + 'sendMessage', data=data)
+                response = requests.post(self.telegramEndpoint + '/sendMessage', data=data)
                 return response

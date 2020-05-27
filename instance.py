@@ -8,7 +8,7 @@ from selenium.webdriver.common.by import By
 from random_user_agent.user_agent import UserAgent
 from random_user_agent.params import SoftwareName, OperatingSystem
 
-from utils import get_regex
+from utils import get_regex, generate_string
 from telegramBot import TelegramBot
 import globals
 
@@ -19,14 +19,16 @@ import time, datetime, threading, re, json, requests, random
 bot = TelegramBot('config.ini', '/')
 
 class SeleniumInstance:
-    def __init__(self, userEmail, dbconn, token, session, ping):
-        self.runAds = False
-        self.runGroups = False
+    
+    def __init__(self, userEmail, dbconn, token=generate_string(), session=generate_string(6), ping=datetime.datetime.now()):
         self.userEmail = userEmail
         self.dbconn = dbconn
         self.token = token
         self.session = session
         self.ping = ping
+
+        self.runAds = False
+        self.runGroups = False
 
         self.hubspot_contact_path = 'C:\\Works\\repos\\playground\\hubspot_contact'
 

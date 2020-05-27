@@ -18,7 +18,7 @@ from versions import versionAvailable
 import globals
 
 
-dbconn = DBConnection()
+dbconn = DBConnection('config.ini')
 bot = TelegramBot('config.ini', '/telegram-message')
 serverStartTime = int(time.mktime(datetime.datetime.now().timetuple()))
 
@@ -125,7 +125,7 @@ class ScrapeAds(RequestHandler):
                 if userEmail not in globals.active_users:
                     self.set_status(202)
                     self.write({'message':'Request Accepted'})
-                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn, generate_string(6), generate_string(), datetime.datetime.now())
+                    globals.active_users[userEmail] = SeleniumInstance(userEmail, dbconn)
                     globals.active_users[userEmail].start('ads', fb_email, fb_pass, teleId, keywords, blacklistKeywords)
 
                 elif globals.active_users[userEmail].runAds == False:

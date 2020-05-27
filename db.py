@@ -9,8 +9,8 @@ import numpy as np
 import utils.readConfig as cfg
 
 class DBConnection:
-    def __init__(self):
-        dbData = cfg.get_section('config.ini', 'db')
+    def __init__(self, config_path):
+        dbData = cfg.get_section(config_path, 'db')
         self.pg_pool = pool.SimpleConnectionPool(20, 100,
                                             database = dbData['dbName'],
                                             user = dbData['dbUser'],
