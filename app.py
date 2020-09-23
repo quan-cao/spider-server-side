@@ -14,6 +14,7 @@ from telegramBot import TelegramBot
 from db import DBConnection
 from instance import SeleniumInstance
 from utils import get_regex, generate_string
+from utils.metabase_api import read_metabase
 from versions import versionAvailable
 import globals
 
@@ -291,9 +292,13 @@ class TelegramMessage(RequestHandler):
         message = json.loads(self.request.body.decode())["message"]
         if message["date"] < serverStartTime:
             return None
-        
-        telegramId = message["from"]["id"]
-        text = message["text"]
+        try:
+            telegramId = message["from"]["id"]
+            text = message["text"]
+        except:
+            self.set_status(200)
+            self.write({'message':'OK'})
+            return None
         if text.startswith('/c'):
             try:
                 user_email, growth_staff, hubspot_owner_id = dbconn.get_staff(telegramId)
@@ -372,28 +377,23 @@ class TelegramMessage(RequestHandler):
                     bot.send_message('Tra cứu thất bại', telegramId)
                     return None
 
-                textSplit = text.split(' ')
-                if len(textSplit) > 2 or len(textSplit) == 1:
-                    bot.send_message("Sai cú pháp", telegramId)
+                textSplit = ''.join(text.split(' ')[1:])
+                user_id = re.sub(r'[\D\s]*', '', textSplit)
+                user_id = re.sub(r'^(0|\+84)', '84', user_id)
+                if re.search(r'\b(84[-.\s]?\d{9})\b', user_id) is None:
+                    bot.send_message('Tra cứu thất bại: Số điện thoại không hợp lệ', telegramId)
                     dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
+                    return None
                 else:
-                    user_id = re.sub(r'\D', '', textSplit[1])
-                    user_id = re.sub(r'^(0|\+84)', '84', user_id)
-                    if re.search(r'\b(84[-.\s]?\d{9})\b', user_id) is None:
-                        bot.send_message('Tra cứu thất bại: Số điện thoại không hợp lệ', telegramId)
-                        dbconn.insert_telegram_command((datetime.datetime.now(), text, False, user_email), transform=False)
-                        return None
-
-                    with open('C:\\Works\\repos\\playground\\hubspot_contact', 'rb') as f:
-                        users = pickle.load(f)
-                    data = users[users.id == user_id]
-
+                    data = read_metabase(14187, user_id=user_id)
+                    data = pd.DataFrame(json.loads(data.text))
                     if len(data) == 0:
                         bot.send_message('User không tồn tại', telegramId)
                         return None
-
+                    data.loc[:, 'create_time'] = pd.to_datetime(data.create_time, unit='s')
+                    data.loc[:, 'last_order'] = pd.to_datetime(data.last_order, unit='s')
                     create_time = data.create_time.iloc[0]
-                    last_order = data.last_order.iloc[0].ceil(freq='s')
+                    last_order = data.last_order.iloc[0].ceil(freq='s', ambiguous='NaT')
                     growth_staff = data.growth_staff.iloc[0]
 
                     if (last_order is pd.NaT) and ((datetime.datetime.now() - create_time).days > 2):
@@ -417,11 +417,11 @@ class TelegramMessage(RequestHandler):
                     bot.send_message(text, telegramId)
             except Exception as e:
                 bot.send_message('Tra cứu thất bại', telegramId)
-                bot.send_message(f'Failed from {user_email}\nReason: {str(e)}', '807358017')
             finally:
                 self.set_status(200)
-                self.write({'message':'OK'})
+                self.write({'message': 'OK'})
                 return None
+
 
 class WhoRun(RequestHandler):
     def get(self):

@@ -13,7 +13,7 @@ from telegramBot import TelegramBot
 import globals
 
 import pandas as pd
-import time, datetime, threading, re, json, requests, random
+import time, datetime, threading, re, json, random
 
 
 bot = TelegramBot('config.ini', '/')
@@ -206,7 +206,7 @@ class SeleniumInstance:
                                 bot.send_message('Your session has stopped', teleId)
                         else:
                             self.standby()
-                            continue
+                            pass
 
 
     def scrape_ads(self, email, password, teleId, keywords, blacklistKeywords):
